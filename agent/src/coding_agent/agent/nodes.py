@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -14,20 +15,27 @@ from langgraph.constants import TAG_NOSTREAM
 from langgraph.graph import END
 from langgraph.types import interrupt
 
-from coding_agent.agent.context import estimate_tokens, fallback_summary, find_cut, summarize
+from coding_agent.agent.context import PRODUCED_BY, estimate_tokens, fallback_summary, find_cut, prepare_messages, summarize
+from coding_agent.agent.llm import provider_of
 from coding_agent.agent.state import AgentState, ApprovalDecision
 from coding_agent.config.settings import Settings
-from coding_agent.prompts.coding_agent import build_system_prompt
-from coding_agent.services.approvals import ApprovalPolicy, Risk
+from coding_agent.prompts.coding_agent import PLAN_MODE_SECTION, build_system_prompt
+from coding_agent.services.approvals import ApprovalPolicy, PolicyDecision, Risk
 from coding_agent.services.history import FileHistory
 from coding_agent.services.memory import MemoryStore, load_instructions
 from coding_agent.services.workspace import Workspace
 from coding_agent.tools.filesystem import FILE_WRITE_TOOL_NAMES, preview_file_change
+from coding_agent.tools.todos import TodoError, validate_todos
 from coding_agent.utils.logging import get_logger
 from coding_agent.utils.security import truncate
 
 log = get_logger("agent")
 UI_RESULT_PREVIEW = 4000
+PLAN_MODE_DENIAL = (
+    "Plan mode: read-only. Investigate with read-only tools, then present your plan "
+    "(update_todos + a short summary) and wait for the user to approve it."
+)
+ModelFactory = Callable[[str], BaseChatModel]
 
 
 def last_ai_message(state: AgentState) -> AIMessage | None:
@@ -96,15 +104,48 @@ class AgentNodes:
         model: BaseChatModel,
         tools: list[BaseTool],
         policy: ApprovalPolicy,
+        model_factory: ModelFactory | None = None,
     ):
         self.settings = settings
         self.workspace = workspace
+        self.tool_list = tools
         self.tools_by_name = {t.name: t for t in tools}
-        self.model = model.bind_tools(tools) if tools else model
-        # Summaries use the plain model, hidden from the UI token stream.
-        self.summary_model = model.with_config(tags=[TAG_NOSTREAM])
         self.policy = policy
         self.memory = MemoryStore(settings.state_dir, workspace.root)
+        self.default_model = settings.default_model_spec
+        self.model_factory = model_factory
+        # spec -> (model bound to the tools, plain model for summaries hidden from the UI stream)
+        self._models: dict[str, tuple[Any, Any]] = {}
+        self._register(self.default_model, model)
+
+    def _register(self, spec: str, model: BaseChatModel) -> tuple[Any, Any]:
+        bound = model.bind_tools(self.tool_list) if self.tool_list else model
+        self._models[spec] = (bound, model.with_config(tags=[TAG_NOSTREAM]))
+        return self._models[spec]
+
+    def models_for(self, spec: str | None) -> tuple[Any, Any]:
+        """Bound and plain models for a session's model spec (built on first use)."""
+        spec = spec or self.default_model
+        if spec not in self._models:
+            if self.model_factory is None:
+                raise ValueError(f"model {spec!r} is not available")
+            self._register(spec, self.model_factory(spec))
+        return self._models[spec]
+
+    def system_message(self, summary: str = "", provider: str = "", mode: str = "build") -> SystemMessage:
+        """The stable prompt first, volatile parts (summary, mode) after it, so provider prompt caches stay warm."""
+        stable = self.system_prompt()
+        volatile = ""
+        if summary:
+            volatile += f"\n## Summary of the earlier conversation\n{summary}\n"
+        if mode == "plan":
+            volatile += PLAN_MODE_SECTION
+        if provider == "anthropic":
+            blocks = [{"type": "text", "text": stable, "cache_control": {"type": "ephemeral"}}]
+            if volatile:
+                blocks.append({"type": "text", "text": volatile})
+            return SystemMessage(content=blocks)
+        return SystemMessage(stable + volatile)
 
     def system_prompt(self, summary: str = "") -> str:
         """Built on every call so edits to the instructions file and new memories apply immediately."""
@@ -139,7 +180,7 @@ class AgentNodes:
         old = messages[:cut]
         fallback = False
         try:
-            new_summary = await summarize(self.summary_model, old, summary)
+            new_summary = await summarize(self.models_for(state.get("model"))[1], old, summary)
         except Exception:
             log.exception("summarization failed; dropping old messages instead")
             new_summary, fallback = fallback_summary(old, summary), True
@@ -171,19 +212,39 @@ class AgentNodes:
             removed = compaction.pop("removed")
             update = compaction
             messages, summary = messages[removed:], compaction["summary"]
-        model_input = [SystemMessage(self.system_prompt(summary)), *repair_dangling_tool_calls(messages)]
-        response = await self.model.ainvoke(model_input, config)
+        spec = state.get("model") or self.default_model
+        provider = provider_of(spec)
+        model_input = [
+            self.system_message(summary, provider, state.get("mode", "build")),
+            *prepare_messages(repair_dangling_tool_calls(messages), provider),
+        ]
+        response = await self.models_for(spec)[0].ainvoke(model_input, config)
+        response = self.tag_response(response, spec)
         log.info(
             "model response",
             extra={
                 "session_id": session_of(config),
                 "agent_node": "agent",
-                "model": self.settings.model,
+                "model": spec,
                 "token_usage": getattr(response, "usage_metadata", None),
                 "event": "llm_call",
             },
         )
         return {**update, "messages": [*update.get("messages", []), response], "iterations": iterations + 1}
+
+    @staticmethod
+    def tag_response(response: AIMessage, spec: str) -> AIMessage:
+        """Record which model produced the message, and make refusals visible instead of an empty answer."""
+        metadata = {**(response.response_metadata or {}), PRODUCED_BY: spec}
+        update: dict = {"response_metadata": metadata}
+        if metadata.get("stop_reason") == "refusal" and not response.text and not response.tool_calls:
+            details = metadata.get("stop_details") or {}
+            category = details.get("category") if isinstance(details, dict) else None
+            update["content"] = (
+                f"The model declined this request{f' (category: {category})' if category else ''}. "
+                "Try rephrasing, or switch models with /model."
+            )
+        return response.model_copy(update=update)
 
     def approval(self, state: AgentState, config: RunnableConfig) -> dict:
         """Evaluate each requested tool call; pause for the user on sensitive ones.
@@ -196,6 +257,8 @@ class AgentNodes:
         for call in message.tool_calls if message else []:
             name, args = call["name"], call["args"]
             decision = self.policy.evaluate(name, args)
+            if state.get("mode") == "plan" and not decision.denied and self.policy.classify(name, args).risk is not Risk.SAFE:
+                decision = PolicyDecision(Risk.DENIED, PLAN_MODE_DENIAL)
             if decision.denied:
                 decisions[call["id"]] = {"approved": False, "feedback": f"Denied by policy: {decision.reason}", "by_policy": True}
                 log.warning(
@@ -254,6 +317,7 @@ class AgentNodes:
         session_id = session_of(config)
         history = FileHistory(self.settings.state_dir, session_id, self.workspace) if session_id else None
         turn = current_turn(state.get("messages") or [])
+        todos = None
         for call in message.tool_calls if message else []:
             name, args, call_id = call["name"], call["args"], call["id"]
             decision = decisions.get(call_id, {"approved": False, "feedback": "No approval decision was recorded."})
@@ -274,7 +338,16 @@ class AgentNodes:
             writer({"type": "tool_start", "id": call_id, "tool": name, "args": args})
             started = time.monotonic()
             tool = self.tools_by_name.get(name)
-            if tool is None:
+            if name == "update_todos":
+                # Updates graph state rather than the outside world, so it's handled here.
+                try:
+                    todos = validate_todos(args.get("todos"))
+                    done = sum(t["status"] == "completed" for t in todos)
+                    content, status = f"Todo list updated ({done}/{len(todos)} done).", "success"
+                    writer({"type": "todos", "todos": todos})
+                except TodoError as exc:
+                    content, status = f"Error: {exc}", "error"
+            elif tool is None:
                 content, status = f"Error: unknown tool {name!r}. Available: {', '.join(sorted(self.tools_by_name))}", "error"
             else:
                 snapshot = history.capture(str(args.get("path", ""))) if history and name in FILE_WRITE_TOOL_NAMES else None
@@ -310,7 +383,10 @@ class AgentNodes:
             results.append(
                 ToolMessage(content=content, tool_call_id=call_id, name=name, status="success" if status == "success" else "error")
             )
-        return {"messages": results, "decisions": {}}
+        update: dict = {"messages": results, "decisions": {}}
+        if todos is not None:
+            update["todos"] = todos
+        return update
 
 
 def route_after_agent(state: AgentState) -> str:

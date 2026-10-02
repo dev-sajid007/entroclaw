@@ -139,3 +139,51 @@ async def test_memory_endpoints(make_client, workspace_dir):
     assert (await client.delete("/memory", params={"scope": "project"})).json() == {"cleared": "project"}
     assert (await client.get("/memory")).json()["project"] == ""
     assert (await client.delete("/memory", params={"scope": "everything"})).status_code == 422
+
+
+async def test_model_switching_endpoints(settings, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    s = settings.with_overrides(models=("anthropic:claude-opus-5-5", "openai:gpt-5"))
+
+    def factory(spec):
+        if spec.startswith("anthropic"):
+            from coding_agent.agent.llm import ConfigurationError
+
+            raise ConfigurationError("ANTHROPIC_API_KEY is not set.")
+        return ScriptedChatModel(responder=lambda _m: {"content": f"answer from {spec}"})
+
+    app = create_app(s, ScriptedChatModel(responder=lambda _m: {"content": "default answer"}), model_factory=factory)
+    lifespan = app.router.lifespan_context(app)
+    await lifespan.__aenter__()
+    try:
+        client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+        models = (await client.get("/models")).json()
+        assert models["default"] == "openai:gpt-4.1-mini"
+        assert models["models"] == ["openai:gpt-4.1-mini", "anthropic:claude-opus-5-5", "openai:gpt-5"]
+        sid = await new_session(client)
+        bad = await client.post(f"/sessions/{sid}/model", json={"model": "anthropic:claude-opus-5-5"})
+        assert bad.status_code == 400 and "ANTHROPIC_API_KEY" in bad.json()["detail"]
+        assert (await client.post(f"/sessions/{sid}/model", json={"model": "nope:x"})).status_code == 400
+        assert (await client.post(f"/sessions/{sid}/model", json={"model": "gpt-5"})).json() == {"model": "openai:gpt-5"}
+        events = await sse(client, f"/sessions/{sid}/messages", {"content": "hi"})
+        assert events[-1]["content"] == "answer from openai:gpt-5"
+        assert (await client.get(f"/sessions/{sid}")).json()["model"] == "openai:gpt-5"
+        health = (await client.get("/health")).json()
+        assert health["sandbox"].startswith(("bwrap", "off")) and "providers" in health
+        await client.aclose()
+    finally:
+        await lifespan.__aexit__(None, None, None)
+
+
+async def test_mode_endpoint_and_todos_in_session(make_client):
+    todos = [{"content": "Investigate", "status": "in_progress"}]
+    client = await make_client(turns=[{"tool_calls": [call("update_todos", todos=todos)]}, {"content": "Plan ready."}])
+    sid = await new_session(client)
+    assert (await client.post(f"/sessions/{sid}/mode", json={"mode": "plan"})).json() == {"mode": "plan"}
+    assert (await client.post(f"/sessions/{sid}/mode", json={"mode": "yolo"})).status_code == 422
+    events = await sse(client, f"/sessions/{sid}/messages", {"content": "plan it"})
+    assert any(e["type"] == "todos" for e in events)
+    session = (await client.get(f"/sessions/{sid}")).json()
+    assert session["mode"] == "plan" and session["todos"] == todos
+    await client.post(f"/sessions/{sid}/mode", json={"mode": "build"})
+    assert (await client.get(f"/sessions/{sid}")).json()["mode"] == "build"

@@ -1,4 +1,4 @@
-from typing import Annotated, TypedDict
+from typing import Annotated, Literal, TypedDict
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
@@ -11,6 +11,11 @@ class ApprovalDecision(TypedDict, total=False):
     always: bool
 
 
+class Todo(TypedDict):
+    content: str
+    status: Literal["pending", "in_progress", "completed"]
+
+
 class AgentState(TypedDict, total=False):
     messages: Annotated[list[AnyMessage], add_messages]
     # Approval outcome per tool_call_id for the most recent batch of tool calls.
@@ -21,3 +26,9 @@ class AgentState(TypedDict, total=False):
     summary: str
     # Session "always allow" rules (ApprovalPolicy.rule_key values) for sensitive, non-high-risk actions.
     allow_rules: list[str]
+    # Per-session model override ("provider:model"); the default model when unset.
+    model: str
+    # "plan" restricts the agent to read-only tools until the user approves; default "build".
+    mode: Literal["build", "plan"]
+    # The agent's live checklist, maintained with the update_todos tool.
+    todos: list[Todo]

@@ -15,6 +15,7 @@ const PREVIEW_LINES = 12
 
 /** One-line summary of tool arguments, e.g. read_file("src/app.py"). */
 export function formatCall(tool: string, args: Record<string, unknown>): string {
+  if (tool === "update_todos" && Array.isArray(args.todos)) return `update_todos(${args.todos.length} items)`
   const primary = args.command ?? args.path ?? args.pattern ?? args.message ?? args.revision
   if (typeof primary === "string") return `${tool}(${JSON.stringify(truncateLine(primary, 80))})`
   const rest = Object.keys(args).length ? truncateLine(JSON.stringify(args), 80) : ""

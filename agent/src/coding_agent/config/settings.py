@@ -39,6 +39,17 @@ class Settings:
     model: str = "gpt-4.1-mini"
     model_provider: str = "openai"
     base_url: str | None = None
+    # Extra models offered for per-session switching, as "provider:model" specs.
+    models: tuple[str, ...] = ()
+    model_effort: str = "high"
+    anthropic_fallbacks: str = "default"
+    # Shell sandbox: "auto" (bubblewrap when available), "bwrap" (required), or "off".
+    sandbox: str = "auto"
+    sandbox_network: bool = False
+    # Web tools.
+    web_allow_private: bool = False
+    tavily_api_key: str | None = field(default=None, repr=False)
+    brave_api_key: str | None = field(default=None, repr=False)
     workspace: Path = field(default_factory=Path.cwd)
     max_tool_output: int = 20_000
     max_file_bytes: int = 1_000_000
@@ -75,6 +86,14 @@ class Settings:
             model=os.environ.get("MODEL") or cls.model,
             model_provider=os.environ.get("MODEL_PROVIDER") or cls.model_provider,
             base_url=os.environ.get("OPENAI_BASE_URL") or None,
+            models=tuple(m.strip() for m in os.environ.get("MODELS", "").split(",") if m.strip()),
+            model_effort=os.environ.get("MODEL_EFFORT") or cls.model_effort,
+            anthropic_fallbacks=os.environ.get("ANTHROPIC_FALLBACKS") or cls.anthropic_fallbacks,
+            sandbox=(os.environ.get("SANDBOX") or cls.sandbox).lower(),
+            sandbox_network=_env_bool("SANDBOX_NETWORK", cls.sandbox_network),
+            web_allow_private=_env_bool("WEB_ALLOW_PRIVATE", cls.web_allow_private),
+            tavily_api_key=os.environ.get("TAVILY_API_KEY") or None,
+            brave_api_key=os.environ.get("BRAVE_SEARCH_API_KEY") or None,
             workspace=workspace,
             max_tool_output=_env_int("MAX_TOOL_OUTPUT", cls.max_tool_output),
             max_file_bytes=_env_int("MAX_FILE_BYTES", cls.max_file_bytes),
@@ -91,6 +110,25 @@ class Settings:
             port=_env_int("PORT", cls.port),
         )
         return settings.with_overrides(**overrides) if overrides else settings
+
+    @property
+    def default_model_spec(self) -> str:
+        """The default model as "provider:model"."""
+        from coding_agent.agent.llm import parse_spec
+
+        provider, model = parse_spec(self.model, self.model_provider)
+        return f"{provider}:{model}"
+
+    @property
+    def available_models(self) -> list[str]:
+        from coding_agent.agent.llm import parse_spec
+
+        specs = [self.default_model_spec]
+        for spec in self.models:
+            provider, model = parse_spec(spec, self.model_provider)
+            if f"{provider}:{model}" not in specs:
+                specs.append(f"{provider}:{model}")
+        return specs
 
     def with_overrides(self, **overrides: object) -> Settings:
         values = {k: v for k, v in overrides.items() if v is not None}

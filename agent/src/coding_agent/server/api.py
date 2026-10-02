@@ -20,10 +20,13 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from coding_agent.agent.graph import Runtime, open_runtime
+from coding_agent.agent.llm import ConfigurationError, configured_providers, parse_spec
+from coding_agent.agent.nodes import ModelFactory
 from coding_agent.config.settings import Settings
 from coding_agent.server.events import message_text, stream_events
 from coding_agent.services.history import FileHistory
 from coding_agent.services.memory import SCOPES, MemoryStore, load_instructions
+from coding_agent.services.sandbox import sandbox_status
 from coding_agent.services.workspace import Workspace
 from coding_agent.utils.logging import get_logger
 
@@ -32,6 +35,14 @@ log = get_logger("api")
 
 class MessageRequest(BaseModel):
     content: str = Field(min_length=1, max_length=100_000)
+
+
+class ModelRequest(BaseModel):
+    model: str = Field(min_length=1, max_length=200)
+
+
+class ModeRequest(BaseModel):
+    mode: Literal["build", "plan"]
 
 
 class ApprovalRequest(BaseModel):
@@ -67,13 +78,13 @@ def sse(events: AsyncIterator[dict], lock: asyncio.Lock) -> StreamingResponse:
     )
 
 
-def create_app(settings: Settings, model: BaseChatModel | None = None) -> FastAPI:
+def create_app(settings: Settings, model: BaseChatModel | None = None, model_factory: ModelFactory | None = None) -> FastAPI:
     locks: dict[str, asyncio.Lock] = {}
     api_token = os.environ.get("AGENT_API_TOKEN")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        async with open_runtime(settings, model) as runtime:
+        async with open_runtime(settings, model, model_factory) as runtime:
             app.state.runtime = runtime
             yield
 
@@ -125,8 +136,11 @@ def create_app(settings: Settings, model: BaseChatModel | None = None) -> FastAP
         return {
             "status": "ok",
             "workspace": str(settings.workspace),
-            "model": settings.model if not settings.fake_model_script else "scripted",
+            "model": settings.default_model_spec if not settings.fake_model_script else "scripted",
+            "models": settings.available_models,
+            "providers": configured_providers(),
             "require_approval": settings.require_approval,
+            "sandbox": sandbox_status(settings).describe(),
             "tools": runtime.tool_names,
             "mcp_errors": runtime.mcp_errors,
         }
@@ -171,6 +185,9 @@ def create_app(settings: Settings, model: BaseChatModel | None = None) -> FastAP
             "messages": history,
             "summary": state.values.get("summary", ""),
             "allow_rules": state.values.get("allow_rules", []),
+            "model": state.values.get("model") or settings.default_model_spec,
+            "mode": state.values.get("mode", "build"),
+            "todos": state.values.get("todos", []),
             "pending_approval": await pending_approval(runtime, session_id),
         }
 
@@ -232,6 +249,32 @@ def create_app(settings: Settings, model: BaseChatModel | None = None) -> FastAP
                 await runtime.graph.aupdate_state(config_for(session_id), {"messages": [HumanMessage(note)]}, as_node="agent")
             log.info("undo", extra={"session_id": session_id, "event": "undo"})
             return {"restored": result.restored, "deleted": result.deleted, "conflicts": result.conflicts}
+
+    @app.get("/models")
+    async def list_models(_: None = Depends(authorize)) -> dict:
+        return {"default": settings.default_model_spec, "models": settings.available_models, "providers": configured_providers()}
+
+    @app.post("/sessions/{session_id}/model")
+    async def set_model(session_id: str, body: ModelRequest, request: Request, _: None = Depends(authorize)) -> dict:
+        runtime = runtime_of(request)
+        provider, name = parse_spec(body.model.strip(), settings.model_provider)
+        spec = f"{provider}:{name}"
+        if spec not in settings.available_models:
+            raise HTTPException(400, f"{spec} is not configured; available: {', '.join(settings.available_models)} (set MODELS)")
+        try:
+            runtime.nodes.models_for(spec)  # fail now on a missing API key, not on the next message
+        except ConfigurationError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        async with idle_session(runtime, session_id):
+            await runtime.graph.aupdate_state(config_for(session_id), {"model": spec}, as_node="agent")
+        return {"model": spec}
+
+    @app.post("/sessions/{session_id}/mode")
+    async def set_mode(session_id: str, body: ModeRequest, request: Request, _: None = Depends(authorize)) -> dict:
+        runtime = runtime_of(request)
+        async with idle_session(runtime, session_id):
+            await runtime.graph.aupdate_state(config_for(session_id), {"mode": body.mode}, as_node="agent")
+        return {"mode": body.mode}
 
     @app.get("/memory")
     async def get_memory(_: None = Depends(authorize)) -> dict:

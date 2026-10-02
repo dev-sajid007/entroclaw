@@ -1,8 +1,8 @@
 // UI state, kept separate from LangGraph state. The server stays the source of truth for agent execution;
 // this only mirrors what the user should see. Updates are immutable so views can diff by reference.
 
-import type { HistoryMessage } from "../api/agent.ts"
-import type { AgentEvent, ApprovalRequest, ToolStatus } from "../api/events.ts"
+import type { HistoryMessage, Mode } from "../api/agent.ts"
+import type { AgentEvent, ApprovalRequest, Todo, ToolStatus } from "../api/events.ts"
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected"
 
@@ -30,6 +30,9 @@ export interface AppState {
   sessionId?: string
   workspace?: string
   model?: string
+  sandbox?: string
+  mode: Mode
+  todos: Todo[]
   items: ChatItem[]
   busy: boolean
   pendingApproval?: ApprovalRequest
@@ -40,7 +43,7 @@ export interface AppState {
 export const MAX_TOOL_OUTPUT_CHARS = 8000
 
 export function initialState(): AppState {
-  return { connection: "connecting", items: [], busy: false, status: "Connecting…", tokens: { input: 0, output: 0 } }
+  return { connection: "connecting", mode: "build", todos: [], items: [], busy: false, status: "Connecting…", tokens: { input: 0, output: 0 } }
 }
 
 function replaceLast<T extends ChatItem>(items: ChatItem[], match: (item: ChatItem) => item is T, update: (item: T) => ChatItem): ChatItem[] | null {
@@ -124,6 +127,9 @@ export function reduce(state: AppState, event: AgentEvent): AppState {
       const how = event.fallback ? "dropped (summarization failed)" : "summarized"
       return { ...state, items: [...state.items, { kind: "info", text: `Context: ${event.removed} older messages ${how} to stay within the model's limit.` }] }
     }
+
+    case "todos":
+      return { ...state, todos: event.todos }
 
     case "usage":
       return { ...state, tokens: { input: state.tokens.input + event.input_tokens, output: state.tokens.output + event.output_tokens } }

@@ -10,11 +10,24 @@ import time
 from langchain_core.tools import BaseTool, tool
 
 from coding_agent.config.settings import Settings
+from coding_agent.services.sandbox import sandbox_argv
 from coding_agent.services.workspace import Workspace
 from coding_agent.tools.filesystem import ToolError
 from coding_agent.utils.security import filtered_env, truncate
 
 MAX_TIMEOUT = 600
+SANDBOX_HINTS = (
+    "Read-only file system",
+    "Permission denied",
+    "Temporary failure in name resolution",
+    "Network is unreachable",
+    "Could not resolve host",
+    "Name or service not known",
+)
+SANDBOX_HINT = (
+    "\n[sandbox] This command ran in a sandbox: only the workspace, /tmp and ~/.cache are writable and there is "
+    "no network access. If the failure is caused by that, tell the user; they can set SANDBOX_NETWORK=true or SANDBOX=off."
+)
 
 
 def _stream_writer():
@@ -46,10 +59,12 @@ async def execute_command(
     timeout: int,
     max_output: int,
     on_output=None,
+    argv_prefix: list[str] | None = None,
 ) -> tuple[int | None, str, bool, float]:
-    """Run `command` through bash. Returns (exit_code, output, timed_out, seconds)."""
+    """Run `command` through bash (inside `argv_prefix`, e.g. a sandbox). Returns (exit_code, output, timed_out, seconds)."""
     started = time.monotonic()
     proc = await asyncio.create_subprocess_exec(
+        *(argv_prefix or []),
         "bash",
         "-c",
         command,
@@ -102,8 +117,15 @@ def make_shell_tools(settings: Settings, workspace: Workspace) -> list[BaseTool]
         def on_output(text: str) -> None:
             writer({"type": "tool_output", "tool": "run_command", "content": text})
 
-        code, output, timed_out, seconds = await execute_command(command, str(directory), limit, settings.max_tool_output, on_output)
+        prefix = sandbox_argv(settings, workspace.root, directory)
+        code, output, timed_out, seconds = await execute_command(
+            command, str(directory), limit, settings.max_tool_output, on_output, argv_prefix=prefix
+        )
         status = f"timed out after {limit}s (process killed)" if timed_out else f"exit code {code}"
-        return f"$ {command}\n[{status}, {seconds:.1f}s]\n{output or '(no output)'}"
+        sandboxed = ", sandboxed" if prefix else ""
+        result = f"$ {command}\n[{status}, {seconds:.1f}s{sandboxed}]\n{output or '(no output)'}"
+        if prefix and code not in (0, None) and any(hint in output for hint in SANDBOX_HINTS):
+            result += SANDBOX_HINT
+        return result
 
     return [run_command]

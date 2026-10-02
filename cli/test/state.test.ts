@@ -125,6 +125,7 @@ test("formatCall shows the primary argument", () => {
   expect(formatCall("read_file", { path: "src/app.ts" })).toBe('read_file("src/app.ts")')
   expect(formatCall("run_command", { command: "echo a\necho b" })).toBe('run_command("echo a…")')
   expect(formatCall("git_status", {})).toBe("git_status()")
+  expect(formatCall("update_todos", { todos: [{}, {}, {}] })).toBe("update_todos(3 items)")
 })
 
 test("shortenPath abbreviates home and long paths", async () => {

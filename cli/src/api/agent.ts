@@ -1,9 +1,12 @@
-import { parseSSE, type AgentEvent, type ApprovalRequest } from "./events.ts"
+import { parseSSE, type AgentEvent, type ApprovalRequest, type Todo } from "./events.ts"
 
 export interface Health {
   status: string
   workspace: string
   model: string
+  models?: string[]
+  providers?: string[]
+  sandbox?: string
   require_approval: boolean
   tools: string[]
   mcp_errors: Record<string, string>
@@ -23,8 +26,13 @@ export interface SessionState {
   messages: HistoryMessage[]
   summary?: string
   allow_rules?: string[]
+  model?: string
+  mode?: Mode
+  todos?: Todo[]
   pending_approval: ApprovalRequest | null
 }
+
+export type Mode = "build" | "plan"
 
 export interface SessionSummary {
   session_id: string
@@ -94,6 +102,18 @@ export class AgentClient {
 
   undo(sessionId: string): Promise<UndoResult> {
     return this.json("POST", `/sessions/${encodeURIComponent(sessionId)}/undo`)
+  }
+
+  listModels(): Promise<{ default: string; models: string[]; providers: string[] }> {
+    return this.json("GET", "/models")
+  }
+
+  setModel(sessionId: string, model: string): Promise<{ model: string }> {
+    return this.json("POST", `/sessions/${encodeURIComponent(sessionId)}/model`, { model })
+  }
+
+  setMode(sessionId: string, mode: Mode): Promise<{ mode: Mode }> {
+    return this.json("POST", `/sessions/${encodeURIComponent(sessionId)}/mode`, { mode })
   }
 
   getMemory(): Promise<MemoryState> {

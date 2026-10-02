@@ -24,7 +24,9 @@ RUN useradd --create-home --uid 1000 agent && mkdir -p /workspace /state && chow
 USER agent
 RUN git config --global --add safe.directory /workspace
 
-ENV WORKSPACE=/workspace \
+# The container is the sandbox; bubblewrap would need extra privileges inside it.
+ENV SANDBOX=off \
+    WORKSPACE=/workspace \
     CHECKPOINT_PATH=/state/checkpoints.sqlite \
     HOST=0.0.0.0 \
     PORT=8765

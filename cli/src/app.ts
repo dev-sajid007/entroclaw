@@ -6,6 +6,7 @@ import { ChatView } from "./components/chat.ts"
 import { Header } from "./components/header.ts"
 import { Input } from "./components/input.ts"
 import { StatusBar } from "./components/status.ts"
+import { TodoPanel } from "./components/todos.ts"
 import { addNotice, addUserMessage, AppStore, fromHistory, resolveApproval, type AppState } from "./state/app-state.ts"
 import type { PromptHistory } from "./state/history.ts"
 
@@ -19,6 +20,9 @@ const HELP = [
   "  /memory              show project instructions and remembered notes",
   "  /forget [project|global]  clear remembered notes (default: project)",
   "  /rules               show actions you chose to always allow this session",
+  "  /model [n|name]      list models or switch this session's model",
+  "  /plan [request]      plan mode: read-only investigation, the agent proposes a plan",
+  "  /go [message]        leave plan mode and carry out the plan",
   "  /session             show the current session id",
   "  /clear               clear the screen (the session keeps its history)",
   "  /quit                exit",
@@ -44,6 +48,7 @@ export class App {
   private readonly chat: ChatView
   private readonly input: Input
   private readonly statusBar: StatusBar
+  private readonly todoPanel: TodoPanel
   private abort?: AbortController
   private spinner?: ReturnType<typeof setInterval>
   /** Result of the last /sessions, so /resume can take a number. */
@@ -60,8 +65,10 @@ export class App {
     this.chat = new ChatView(renderer)
     this.input = new Input(renderer, (value) => void this.submit(value), history)
     this.statusBar = new StatusBar(renderer)
+    this.todoPanel = new TodoPanel(renderer)
     layout.add(this.header.view)
     layout.add(this.chat.view)
+    layout.add(this.todoPanel.view)
     layout.add(this.input.view)
     layout.add(this.statusBar.view)
     renderer.root.add(layout)
@@ -75,7 +82,14 @@ export class App {
   async start(sessionId?: string, options: { continueLatest?: boolean } = {}): Promise<void> {
     try {
       const health = await this.client.health()
-      this.store.update((s) => ({ ...s, connection: "connected", workspace: health.workspace, model: health.model, status: "Ready" }))
+      this.store.update((s) => ({
+        ...s,
+        connection: "connected",
+        workspace: health.workspace,
+        model: health.model,
+        sandbox: health.sandbox,
+        status: "Ready",
+      }))
       for (const [server, error] of Object.entries(health.mcp_errors)) {
         this.store.update((s) => addNotice(s, `MCP server "${server}" failed to load: ${error}`, "error"))
       }
@@ -160,6 +174,9 @@ export class App {
     this.store.update((s) => ({
       ...fromHistory(s, session.messages, session.pending_approval, session.summary),
       sessionId,
+      model: session.model ?? s.model,
+      mode: session.mode ?? "build",
+      todos: session.todos ?? [],
       tokens: { input: 0, output: 0 },
     }))
     this.notice(session.messages.length ? `Resumed session ${sessionId}` : `Session ${sessionId} has no messages yet`)
@@ -206,7 +223,19 @@ export class App {
       case "new": {
         if (this.store.state.busy) this.cancel()
         const id = await this.client.createSession()
-        this.store.update((s) => ({ ...s, sessionId: id, items: [], pendingApproval: undefined, busy: false, status: "Ready", tokens: { input: 0, output: 0 } }))
+        const model = (await this.client.health()).model
+        this.store.update((s) => ({
+          ...s,
+          sessionId: id,
+          model,
+          mode: "build",
+          todos: [],
+          items: [],
+          pendingApproval: undefined,
+          busy: false,
+          status: "Ready",
+          tokens: { input: 0, output: 0 },
+        }))
         this.notice(`New session ${id}`)
         return
       }
@@ -276,6 +305,44 @@ export class App {
         this.notice(`Cleared ${scope} memory.`)
         return
       }
+      case "model": {
+        const { models } = await this.client.listModels()
+        const current = this.store.state.model
+        const target = args[0]
+        if (!target) {
+          const lines = models.map((m, i) => `${m === current ? "*" : " "}${String(i + 1).padStart(2)}. ${m}`)
+          this.notice(["Models (switch with /model <n|name>; add more with MODELS in agent/.env):", ...lines].join("\n"))
+          return
+        }
+        const sessionId = this.idleSession()
+        if (!sessionId) return
+        const spec = /^\d+$/.test(target) ? models[Number(target) - 1] : target
+        if (!spec) {
+          this.notice(`No model #${target}. Run /model to list them.`, "error")
+          return
+        }
+        const { model } = await this.client.setModel(sessionId, spec)
+        this.store.update((s) => ({ ...s, model }))
+        this.notice(`Model: ${model}`)
+        return
+      }
+      case "plan":
+      case "go": {
+        const sessionId = this.idleSession()
+        if (!sessionId) return
+        const mode = name === "plan" ? "plan" : "build"
+        await this.client.setMode(sessionId, mode)
+        this.store.update((s) => ({ ...s, mode }))
+        if (mode === "plan") {
+          this.notice("Plan mode: the agent can read and run read-only commands, but not change anything. /go to approve and build.")
+          const request = args.join(" ").trim()
+          if (request) await this.submit(request)
+        } else {
+          this.notice("Build mode: the agent can make changes again (with your approval).")
+          await this.submit(args.join(" ").trim() || "Proceed with the plan.")
+        }
+        return
+      }
       case "rules": {
         const sessionId = this.store.state.sessionId
         if (!sessionId) return
@@ -296,6 +363,7 @@ export class App {
 
   private render(state: AppState): void {
     this.header.update(state)
+    this.todoPanel.update(state)
     this.chat.sync(state.items)
     this.input.update(state)
     this.statusBar.update(state)

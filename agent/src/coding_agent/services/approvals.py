@@ -7,6 +7,7 @@ import shlex
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from coding_agent.config.settings import Settings
 from coding_agent.services.workspace import Workspace
@@ -33,7 +34,7 @@ class PolicyDecision:
 
 READ_ONLY_TOOLS = {"list_files", "read_file", "search_files", "git_status", "git_diff", "git_log", "git_show"}
 # Tools that only change the agent's own state (never the workspace).
-AGENT_STATE_TOOLS = {"remember"}
+AGENT_STATE_TOOLS = {"remember", "update_todos"}
 GIT_WRITE_TOOLS = {"git_add", "git_commit"}
 
 DENY_PATTERNS: list[tuple[re.Pattern[str], str]] = [
@@ -128,6 +129,10 @@ class ApprovalPolicy:
         self.workspace = workspace
         self.trusted_tools = trusted_tools or set()
 
+    def classify(self, name: str, args: dict) -> PolicyDecision:
+        """Risk before the require_approval setting is applied (used by plan mode)."""
+        return self._classify(name, args)
+
     def evaluate(self, name: str, args: dict) -> PolicyDecision:
         decision = self._classify(name, args)
         if decision.risk is Risk.SENSITIVE and not self.settings.require_approval:
@@ -139,6 +144,8 @@ class ApprovalPolicy:
         """Key for a session "always allow" rule: the exact command for run_command, the tool name otherwise."""
         if name == "run_command":
             return f"run_command:{str(args.get('command', '')).strip()}"
+        if name == "fetch_url":
+            return f"fetch_url:{urlsplit(str(args.get('url', ''))).hostname or ''}"
         return name
 
     def _classify(self, name: str, args: dict) -> PolicyDecision:
@@ -154,6 +161,11 @@ class ApprovalPolicy:
             return PolicyDecision(Risk.SAFE)
         if name == "run_command":
             return classify_command(str(args.get("command", "")), self.workspace)
+        if name == "fetch_url":
+            host = urlsplit(str(args.get("url", ""))).hostname or "?"
+            return PolicyDecision(Risk.SENSITIVE, f"fetches a page from {host} (the URL is sent to that site)")
+        if name == "web_search":
+            return PolicyDecision(Risk.SENSITIVE, "sends the query to a web search provider")
         return PolicyDecision(Risk.SENSITIVE, f"{name} is an external tool")
 
     def _classify_file_write(self, path: str) -> PolicyDecision:

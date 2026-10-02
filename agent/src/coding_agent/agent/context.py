@@ -82,3 +82,43 @@ def fallback_summary(messages: list[AnyMessage], previous_summary: str) -> str:
     parts = [previous_summary] if previous_summary else []
     parts.append("Earlier user requests (details of the work were dropped to save space):\n" + "\n".join(requests))
     return "\n\n".join(parts)
+
+
+REASONING_BLOCKS = {"thinking", "redacted_thinking", "reasoning"}
+# response_metadata key recording which "provider:model" produced an AIMessage.
+PRODUCED_BY = "coding_agent_model"
+
+
+def _text_only(message: AIMessage) -> AIMessage:
+    return message.model_copy(update={"content": message.text})
+
+
+def _without_reasoning(message: AIMessage) -> AIMessage:
+    if not isinstance(message.content, list):
+        return message
+    content = [b for b in message.content if not (isinstance(b, dict) and b.get("type") in REASONING_BLOCKS)]
+    if len(content) == len(message.content):
+        return message
+    return message.model_copy(update={"content": content})
+
+
+def prepare_messages(messages: list[AnyMessage], provider: str) -> list[AnyMessage]:
+    """Make stored history safe to send to `provider`.
+
+    - Reasoning/thinking blocks are removed from turns before the current one. Removing them from the front
+      of the history is allowed by providers that bind thinking to the conversation, and older reasoning is
+      not useful once a turn is finished.
+    - Messages produced by a different provider (after a model switch) are reduced to text plus the
+      structured tool_calls, since provider-specific content blocks don't translate.
+    """
+    last_human = max((i for i, m in enumerate(messages) if isinstance(m, HumanMessage)), default=-1)
+    prepared: list[AnyMessage] = []
+    for i, message in enumerate(messages):
+        if isinstance(message, AIMessage):
+            producer = (message.response_metadata or {}).get(PRODUCED_BY, "")
+            if producer and producer.partition(":")[0] != provider:
+                message = _text_only(message)
+            elif i < last_human:
+                message = _without_reasoning(message)
+        prepared.append(message)
+    return prepared

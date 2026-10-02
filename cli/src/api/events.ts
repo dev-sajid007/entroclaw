@@ -1,5 +1,10 @@
 // Event protocol streamed by the Python agent over SSE (see agent/src/coding_agent/server/events.py).
 
+export interface Todo {
+  content: string
+  status: "pending" | "in_progress" | "completed"
+}
+
 export type ToolStatus = "running" | "success" | "error" | "rejected" | "denied"
 
 export interface ApprovalRequest {
@@ -28,6 +33,7 @@ export type AgentEvent =
   | ApprovalRequest
   | { type: "usage"; input_tokens: number; output_tokens: number; total_tokens: number }
   | { type: "context_compacted"; removed: number; fallback: boolean }
+  | { type: "todos"; todos: Todo[] }
   | { type: "final"; content: string }
   | { type: "error"; message: string }
 

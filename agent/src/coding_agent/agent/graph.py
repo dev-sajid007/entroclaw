@@ -13,7 +13,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from coding_agent.agent.llm import build_model
-from coding_agent.agent.nodes import AgentNodes, route_after_agent
+from coding_agent.agent.nodes import AgentNodes, ModelFactory, route_after_agent
 from coding_agent.agent.state import AgentState
 from coding_agent.config.settings import Settings
 from coding_agent.services.approvals import ApprovalPolicy
@@ -25,6 +25,8 @@ from coding_agent.tools.git import make_git_tools
 from coding_agent.tools.mcp import load_mcp_tools
 from coding_agent.tools.memory import make_memory_tools
 from coding_agent.tools.shell import make_shell_tools
+from coding_agent.tools.todos import make_todo_tools
+from coding_agent.tools.web import make_web_tools
 
 
 def build_tools(settings: Settings, workspace: Workspace) -> list[BaseTool]:
@@ -33,6 +35,8 @@ def build_tools(settings: Settings, workspace: Workspace) -> list[BaseTool]:
         *make_shell_tools(settings, workspace),
         *make_git_tools(settings, workspace),
         *make_memory_tools(MemoryStore(settings.state_dir, workspace.root)),
+        *make_todo_tools(),
+        *make_web_tools(settings),
     ]
 
 
@@ -44,9 +48,16 @@ def build_graph(
     extra_tools: list[BaseTool] | None = None,
     trusted_tools: set[str] | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
+    model_factory: ModelFactory | None = None,
 ) -> CompiledStateGraph:
     graph, _nodes = build_agent(
-        settings, model, workspace=workspace, extra_tools=extra_tools, trusted_tools=trusted_tools, checkpointer=checkpointer
+        settings,
+        model,
+        workspace=workspace,
+        extra_tools=extra_tools,
+        trusted_tools=trusted_tools,
+        checkpointer=checkpointer,
+        model_factory=model_factory,
     )
     return graph
 
@@ -59,12 +70,13 @@ def build_agent(
     extra_tools: list[BaseTool] | None = None,
     trusted_tools: set[str] | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
+    model_factory: ModelFactory | None = None,
 ) -> tuple[CompiledStateGraph, AgentNodes]:
     """Compile the graph and also return its nodes, which the API uses for out-of-run operations (compaction)."""
     workspace = workspace or Workspace(settings.workspace)
     tools = [*build_tools(settings, workspace), *(extra_tools or [])]
     policy = ApprovalPolicy(settings, workspace, trusted_tools)
-    nodes = AgentNodes(settings, workspace, model, tools, policy)
+    nodes = AgentNodes(settings, workspace, model, tools, policy, model_factory)
 
     graph = StateGraph(AgentState)
     graph.add_node("agent", nodes.agent)
@@ -88,7 +100,9 @@ class Runtime:
 
 
 @asynccontextmanager
-async def open_runtime(settings: Settings, model: BaseChatModel | None = None) -> AsyncIterator[Runtime]:
+async def open_runtime(
+    settings: Settings, model: BaseChatModel | None = None, model_factory: ModelFactory | None = None
+) -> AsyncIterator[Runtime]:
     """Open the persistent checkpointer, load MCP tools and compile the graph."""
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
@@ -101,6 +115,7 @@ async def open_runtime(settings: Settings, model: BaseChatModel | None = None) -
             extra_tools=mcp.tools,
             trusted_tools=mcp.trusted,
             checkpointer=checkpointer,
+            model_factory=model_factory or (lambda spec: build_model(settings, spec)),
         )
         # The session index shares the checkpointer's SQLite connection and lock.
         sessions = SessionStore(checkpointer.conn, checkpointer.lock)

@@ -5,7 +5,18 @@ A terminal AI coding assistant with two deliberately separate parts:
 - **`agent/`**: Python 3.12, LangGraph runtime, tools, policy/approval layer, HTTP + SSE API
 - **`cli/`**: TypeScript, Bun and OpenTUI terminal UI
 
-The full design is in [coding-agent-documentation.md](coding-agent-documentation.md).
+## Documentation
+
+| | |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | How the graph, policy, state, persistence and UI fit together |
+| [docs/api.md](docs/api.md) | HTTP endpoints and the SSE event protocol |
+| [docs/evaluation.md](docs/evaluation.md) | Running and extending the benchmark |
+| [SECURITY.md](SECURITY.md) | Threat model, defences, known limitations, reporting |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Setup, tests and how to change things |
+| [AGENTS.md](AGENTS.md) | Repository guide for AI coding agents (also loaded by this agent) |
+| [CHANGELOG.md](CHANGELOG.md) | What changed |
+| [coding-agent-documentation.md](coding-agent-documentation.md) | The original design spec and milestones |
 
 ## Quick start
 
@@ -47,6 +58,8 @@ cd agent && WORKSPACE=/path/to/repo uv run coding-agent run "Fix the failing tes
 | `/compact` | summarize older messages now |
 | `/memory`, `/forget [project\|global]` | show or clear remembered notes |
 | `/rules` | show what is always allowed in this session |
+| `/model [n\|name]` | list models or switch this session's model |
+| `/plan [request]`, `/go` | plan mode (read-only investigation + todo list), then carry out the plan |
 | `/new`, `/session`, `/clear`, `/help`, `/quit` | other commands |
 
 Agent replies render as markdown. Fenced code is syntax-highlighted for JS/TS; other languages show as plain code.
@@ -64,6 +77,22 @@ OpenTUI (cli/) ──HTTP/SSE──► FastAPI (server/api.py) ──► LangGra
 - **approval** has no side effects. It runs every requested tool call through the policy (`services/approvals.py`) and pauses the graph (`interrupt`) for sensitive ones. File writes carry a unified diff to the UI. Because the node does nothing else, re-running it on resume can't execute anything twice.
 - **tools** executes the approved calls and streams `tool_start` / `tool_output` / `tool_end` events. Failures go back to the model as tool errors, so it can recover.
 - State is checkpointed to SQLite (`CHECKPOINT_PATH`). Sessions, including a pending approval and "always allow" rules, survive a server restart and can be resumed (`-c`, `--session`, `/resume`).
+
+### Models
+
+Models are named `provider:model`. `MODEL` is the default, and `MODELS` lists extra models offered by `/model`, which switches per session. OpenAI, Anthropic and any provider supported by LangChain's `init_chat_model` work; set each provider's API key.
+
+Claude models (e.g. `anthropic:claude-opus-5-5`) are configured for agentic coding:
+- adaptive thinking, with depth set by `MODEL_EFFORT` (default `high`)
+- streaming, with 64k max output tokens
+- no sampling parameters
+- the system prompt is cached
+- thinking blocks from earlier turns are stripped, and edited history is sent with `drop_block`, so compaction and model switches never fail a request
+- server-side refusal fallback (`fallbacks: "default"`) is on; set `ANTHROPIC_FALLBACKS=off` to disable it
+
+### Plan mode and todos
+
+`/plan` limits the agent to read-only tools: reading, searching, allowlisted commands and its todo list. Anything else is denied without asking. The agent investigates, writes the steps with `update_todos` (shown in a panel above the input) and proposes a plan. `/go` switches back to build mode and carries it out. The todo list is also used in normal mode for multi-step work.
 
 ### Context, instructions and memory
 
@@ -96,7 +125,14 @@ OpenTUI (cli/) ──HTTP/SSE──► FastAPI (server/api.py) ──► LangGra
 - The API binds to 127.0.0.1. Set `AGENT_API_TOKEN` to require a bearer token.
 - Only `agent/.env` (or `AGENT_ENV_FILE`) is loaded, never a `.env` in the workspace.
 
-`run_command` is not an OS sandbox: an approved command runs with your user's permissions. For stronger isolation, run the agent in the Docker image.
+**Sandbox.** When bubblewrap is installed (`SANDBOX=auto`, the default), every `run_command` runs inside it:
+- the filesystem is read-only except the workspace, a private `/tmp` and `~/.cache`
+- there's no network (`SANDBOX_NETWORK=true` allows it)
+- `~/.ssh`, `~/.aws`, `~/.gnupg`, cloud/CLI credential directories, `.netrc`-style files, the agent's state directory and its `.env` are hidden
+
+The sandbox contains approved commands; approval rules still decide what runs. Git tools run outside it with fixed arguments. Without bubblewrap the status bar shows `unsandboxed`, and you can use the Docker image instead.
+
+**Web.** `fetch_url` (always available) and `web_search` (with `TAVILY_API_KEY` or `BRAVE_SEARCH_API_KEY`) need approval, because a URL or query can carry data out. Always-allow works per domain. Private, loopback, link-local and cloud-metadata addresses are refused, and checked again on every redirect. Fetched content is labelled untrusted.
 
 ## Configuration
 
@@ -111,6 +147,9 @@ All settings are environment variables. See [agent/.env.example](agent/.env.exam
 | `REQUIRE_APPROVAL` | `true` | |
 | `CONTEXT_TOKEN_LIMIT`, `CONTEXT_KEEP_TOKENS` | 100000, 30000 | when to summarize, and how much recent history to keep |
 | `STATE_DIR` | `~/.local/state/coding-agent` | checkpoints, sessions, memory and undo snapshots |
+| `MODELS`, `MODEL_EFFORT`, `ANTHROPIC_FALLBACKS` | —, `high`, `default` | extra models for `/model`; Claude effort; Claude refusal fallback |
+| `SANDBOX`, `SANDBOX_NETWORK` | `auto`, `false` | bubblewrap sandbox for shell commands |
+| `TAVILY_API_KEY` / `BRAVE_SEARCH_API_KEY`, `WEB_ALLOW_PRIVATE` | —, `false` | web search provider; allow private-network fetches |
 | `CHECKPOINT_PATH` | `$STATE_DIR/checkpoints.sqlite` | |
 | `MCP_CONFIG` | — | path to an MCP config, see [agent/mcp.example.json](agent/mcp.example.json) |
 | `AGENT_API_TOKEN` | — | require `Authorization: Bearer …` |
