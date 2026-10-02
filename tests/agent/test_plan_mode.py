@@ -68,7 +68,9 @@ async def test_build_mode_is_unchanged(settings):
 
 async def test_update_todos_updates_state_and_streams(settings):
     graph = build_graph(
-        settings, ScriptedChatModel(turns=[{"tool_calls": [call("update_todos", todos=TODOS)]}, {"content": "ok"}]), checkpointer=InMemorySaver()
+        settings,
+        ScriptedChatModel(turns=[{"tool_calls": [call("update_todos", todos=TODOS)]}, {"content": "ok"}]),
+        checkpointer=InMemorySaver(),
     )
     events = await run(graph, "go")
     assert next(e for e in events if e["type"] == "todos")["todos"] == TODOS
@@ -80,7 +82,9 @@ async def test_update_todos_updates_state_and_streams(settings):
 async def test_invalid_todos_are_reported_to_the_model(settings):
     bad = [{"content": "a", "status": "in_progress"}, {"content": "b", "status": "in_progress"}]
     graph = build_graph(
-        settings, ScriptedChatModel(turns=[{"tool_calls": [call("update_todos", todos=bad)]}, {"content": "ok"}]), checkpointer=InMemorySaver()
+        settings,
+        ScriptedChatModel(turns=[{"tool_calls": [call("update_todos", todos=bad)]}, {"content": "ok"}]),
+        checkpointer=InMemorySaver(),
     )
     events = await run(graph, "go")
     end = next(e for e in events if e["type"] == "tool_end")

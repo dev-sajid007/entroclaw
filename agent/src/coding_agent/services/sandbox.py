@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
+import sys
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 
-from coding_agent.config.settings import AGENT_ENV_FILE, Settings
+from coding_agent.config.settings import AGENT_ENV_FILE, Settings, config_dir
 
 # Directories replaced by an empty tmpfs inside the sandbox.
 HIDDEN_DIRS = (".ssh", ".gnupg", ".aws", ".azure", ".config/gcloud", ".config/gh", ".docker", ".kube", ".password-store")
@@ -40,18 +43,39 @@ def in_container() -> bool:
     return Path("/.dockerenv").exists() or Path("/run/.containerenv").exists()
 
 
+@cache
+def bwrap_usable() -> tuple[bool, str]:
+    """bwrap can be installed yet unable to create namespaces (e.g. Ubuntu 24.04's AppArmor userns restriction)."""
+    if shutil.which("bwrap") is None:
+        return False, "bubblewrap not installed"
+    try:
+        probe = subprocess.run(
+            ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--unshare-all", "true"], capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"bubblewrap failed to run: {exc}"
+    if probe.returncode != 0:
+        detail = (probe.stderr.strip().splitlines() or ["unknown error"])[-1]
+        return False, f"bubblewrap cannot create a sandbox here ({detail})"
+    return True, ""
+
+
 def sandbox_status(settings: Settings) -> SandboxStatus:
     mode = settings.sandbox
     if mode == "off":
         return SandboxStatus(False, True, "disabled by SANDBOX=off")
-    available = shutil.which("bwrap") is not None
+    if not sys.platform.startswith("linux"):
+        if mode == "bwrap":
+            raise SandboxError("the bubblewrap sandbox is only available on Linux")
+        return SandboxStatus(False, True, "not available on this platform")
+    usable, reason = bwrap_usable()
     if mode == "bwrap":
-        if not available:
-            raise SandboxError("SANDBOX=bwrap but bubblewrap (bwrap) is not installed")
+        if not usable:
+            raise SandboxError(f"SANDBOX=bwrap but {reason}")
         return SandboxStatus(True, settings.sandbox_network)
     # auto
-    if not available:
-        return SandboxStatus(False, True, "bubblewrap not installed")
+    if not usable:
+        return SandboxStatus(False, True, reason)
     if in_container():
         return SandboxStatus(False, True, "already running in a container")
     return SandboxStatus(True, settings.sandbox_network)
@@ -74,7 +98,7 @@ def sandbox_argv(settings: Settings, workspace: Path, cwd: Path, home: Path | No
     cache = home / ".cache"
     if cache.is_dir():
         argv += ["--bind", str(cache), str(cache)]
-    hidden_dirs = [home / d for d in HIDDEN_DIRS] + [settings.state_dir]
+    hidden_dirs = [home / d for d in HIDDEN_DIRS] + [settings.state_dir, config_dir()]
     for directory in hidden_dirs:
         # The workspace itself must stay visible even if it lives under a hidden path.
         if directory.is_dir() and not workspace.is_relative_to(directory):

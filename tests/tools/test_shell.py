@@ -5,6 +5,9 @@ import pytest
 from coding_agent.tools.shell import make_shell_tools
 from coding_agent.utils.security import SecurityError
 
+# These tests drive POSIX tools (seq, sleep, env, bash syntax); Windows has its own tests in test_platform.py.
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="POSIX shell tools")
+
 
 @pytest.fixture
 def run_command(settings, workspace):

@@ -21,14 +21,15 @@ The model is treated as **capable but not trusted**. It can be wrong, and it can
 | Web | `fetch_url` and `web_search` need approval (URLs and queries can exfiltrate data). Private, loopback, link-local and metadata addresses are refused on every redirect. Content is labelled untrusted. | `tools/web.py` |
 | Memory | Notes are stored outside the repository, and notes that look like secrets are refused. | `services/memory.py` |
 | Untrusted content | The system prompt treats files, command output and web content as data, never instructions. Project instructions can't override the safety rules. | `prompts/coding_agent.py` |
-| API | Binds to `127.0.0.1`; set `AGENT_API_TOKEN` to require a bearer token. | `server/api.py` |
+| API | Binds to `127.0.0.1`. The `entroclaw` launcher always starts the agent on a random port with a fresh random bearer token; for a manually started server, set `AGENT_API_TOKEN`. | `server/api.py`, `cli/src/launcher/agent.ts` |
+| Installation | `install.sh` / `install.ps1` verify each download against the release's `SHA256SUMS` before installing. The config file holding API keys is created with mode `0600`, and the sandbox hides the config directory from commands. | `install.sh`, `cli/src/launcher/config.ts` |
 | Logs | Structured JSON with key and token patterns redacted. | `utils/logging.py` |
 | Agent config | Only `agent/.env` (or `AGENT_ENV_FILE`) is loaded, never a `.env` in the workspace. | `config/settings.py` |
 
 ## Known limitations
 
 - **Approval is the main control.** An approved command can still do anything the sandbox allows: write anywhere in the workspace, or read files outside the hidden locations. Read what you approve, especially high-risk actions.
-- **Without bubblewrap there is no sandbox.** Commands run with your user's permissions; the status bar shows `unsandboxed`. Use the Docker image for isolation on such systems.
+- **The sandbox is Linux-only.** On macOS and Windows, and on Linux without a working bubblewrap (not installed, or user namespaces blocked as on default Ubuntu 24.04+), commands run with your user's permissions. The status bar shows `unsandboxed` and `entroclaw doctor` gives the reason. Use the Docker image for isolation on such systems.
 - **Secret hiding is a denylist.** The sandbox hides well-known credential locations, but the rest of the filesystem stays readable. Keep secrets in standard places, or run in Docker.
 - **The git tools run outside the sandbox.** They use fixed arguments with no shell, and their write operations need approval.
 - **MCP servers run with your permissions.** They aren't sandboxed. Their tools need approval unless you list them in `trusted_tools`; only trust servers you would run yourself.

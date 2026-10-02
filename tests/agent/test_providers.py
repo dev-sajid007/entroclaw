@@ -84,7 +84,10 @@ def test_prepare_messages_after_model_switch():
     call = {"name": "list_files", "args": {}, "id": "c1", "type": "tool_call"}
     history = [
         HumanMessage("go"),
-        ai([THINKING, {"type": "text", "text": "Looking."}, {"type": "tool_use", "id": "c1", "name": "list_files", "input": {}}], tool_calls=[call]),
+        ai(
+            [THINKING, {"type": "text", "text": "Looking."}, {"type": "tool_use", "id": "c1", "name": "list_files", "input": {}}],
+            tool_calls=[call],
+        ),
         ToolMessage("files", tool_call_id="c1"),
     ]
     prepared = prepare_messages(history, "openai")

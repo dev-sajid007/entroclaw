@@ -23,6 +23,7 @@ IGNORED_DIRS = {
     ".next",
     ".turbo",
     ".coding-agent",
+    ".entroclaw",
 }
 
 

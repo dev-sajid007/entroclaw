@@ -21,7 +21,7 @@ export class Header {
       paddingX: 1,
       flexShrink: 0,
     })
-    this.view.add(new TextRenderable(ctx, { content: styled([strong("⚡ Coding Agent", colors.accent)]), flexShrink: 0 }))
+    this.view.add(new TextRenderable(ctx, { content: styled([strong("⚡ entroclaw", colors.accent)]), flexShrink: 0 }))
     this.right = new TextRenderable(ctx, { content: "", wrapMode: "none" })
     this.view.add(this.right)
   }

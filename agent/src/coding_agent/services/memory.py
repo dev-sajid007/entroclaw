@@ -16,7 +16,7 @@ from coding_agent.services.workspace import Workspace
 from coding_agent.utils.logging import SECRET_VALUE
 from coding_agent.utils.security import SecurityError, truncate
 
-INSTRUCTION_FILES = ("AGENTS.md", "CLAUDE.md", ".coding-agent/instructions.md")
+INSTRUCTION_FILES = ("AGENTS.md", "CLAUDE.md", ".entroclaw/instructions.md", ".coding-agent/instructions.md")
 MAX_INSTRUCTIONS_CHARS = 20_000
 MAX_MEMORY_CHARS = 8_000
 MAX_NOTE_CHARS = 500

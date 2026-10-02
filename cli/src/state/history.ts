@@ -1,14 +1,14 @@
 // Prompt history for the input box: Up/Down recall, persisted across runs.
 
 import { mkdirSync } from "node:fs"
-import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+
+import { stateDir } from "../launcher/paths.ts"
 
 export const MAX_HISTORY = 200
 
 export function defaultHistoryPath(): string {
-  const base = process.env.XDG_STATE_HOME || join(homedir(), ".local", "state")
-  return join(base, "coding-agent", "cli-history.json")
+  return join(stateDir(), "cli-history.json")
 }
 
 export class PromptHistory {

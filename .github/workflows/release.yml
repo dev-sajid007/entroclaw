@@ -1,0 +1,144 @@
+name: Release
+
+# Push a tag like v0.2.0 (matching the version in cli/package.json, agent/pyproject.toml and
+# npm/entroclaw/package.json) to build binaries for every platform, publish a GitHub Release with
+# checksums, and publish to npm when NPM_TOKEN is set.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          cli=$(node -p "require('./cli/package.json').version")
+          npm=$(node -p "require('./npm/entroclaw/package.json').version")
+          agent=$(sed -n 's/^version = "\(.*\)"/\1/p' agent/pyproject.toml | head -n1)
+          echo "tag=$tag cli=$cli npm=$npm agent=$agent"
+          [ "$tag" = "$cli" ] && [ "$tag" = "$npm" ] && [ "$tag" = "$agent" ] || { echo "::error::versions don't match the tag"; exit 1; }
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+
+  wheel:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build --wheel -o dist
+        working-directory: agent
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel
+          path: agent/dist/*.whl
+
+  binaries:
+    needs: [version, wheel]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest, platform: linux-x64, target: bun-linux-x64 }
+          - { runner: ubuntu-latest, platform: linux-x64-musl, target: bun-linux-x64-musl, smoke: false }
+          - { runner: ubuntu-24.04-arm, platform: linux-arm64, target: bun-linux-arm64 }
+          - { runner: macos-13, platform: darwin-x64, target: bun-darwin-x64 }
+          - { runner: macos-14, platform: darwin-arm64, target: bun-darwin-arm64 }
+          - { runner: windows-latest, platform: windows-x64, target: bun-windows-x64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: wheel
+      - name: Build
+        shell: bash
+        working-directory: cli
+        run: |
+          bun install --frozen-lockfile
+          exe=entroclaw; [ "${{ runner.os }}" = Windows ] && exe=entroclaw.exe
+          bun build src/main.ts --compile --minify --target=${{ matrix.target }} --outfile "dist/${{ matrix.platform }}/$exe"
+      - name: Smoke test (binary + agent wheel, scripted model)
+        if: matrix.smoke != false
+        shell: bash
+        run: |
+          exe="$PWD/cli/dist/${{ matrix.platform }}/entroclaw"; [ "${{ runner.os }}" = Windows ] && exe="$exe.exe"
+          test "$("$exe" --version)" = "${{ needs.version.outputs.version }}"
+          uv tool install --python 3.12 wheel/*.whl
+          export PATH="$(uv tool dir --bin):$PATH"
+          mkdir -p "$RUNNER_TEMP/project" && cd "$RUNNER_TEMP/project"
+          echo '[{"tool_calls":[{"name":"write_file","args":{"path":"hello.txt","content":"hi\n"}}]},{"content":"done"}]' > "$RUNNER_TEMP/script.json"
+          FAKE_MODEL_SCRIPT="$RUNNER_TEMP/script.json" "$exe" run "create hello.txt" --yes
+          grep -q hi hello.txt
+          "$exe" doctor || true
+      - name: Package
+        shell: bash
+        working-directory: cli/dist/${{ matrix.platform }}
+        run: |
+          if [ "${{ runner.os }}" = Windows ]; then 7z a "../entroclaw-${{ matrix.platform }}.zip" entroclaw.exe >/dev/null
+          else tar -czf "../entroclaw-${{ matrix.platform }}.tar.gz" entroclaw; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.platform }}
+          path: |
+            cli/dist/entroclaw-${{ matrix.platform }}.*
+            cli/dist/${{ matrix.platform }}/
+
+  release:
+    needs: [version, wheel, binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect assets
+        run: |
+          mkdir release
+          cp artifacts/wheel/*.whl release/
+          cp artifacts/binary-*/entroclaw-*.tar.gz artifacts/binary-*/entroclaw-*.zip release/ 2>/dev/null || true
+          (cd release && sha256sum * > SHA256SUMS)
+          cat release/SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+
+  npm:
+    needs: [version, release]
+    runs-on: ubuntu-latest
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          path: artifacts
+      - name: Build packages
+        run: |
+          mkdir -p bins
+          for dir in artifacts/binary-*; do
+            platform="${dir#artifacts/binary-}"
+            mkdir -p "bins/$platform" && cp "$dir/$platform"/entroclaw* "bins/$platform/"
+          done
+          node scripts/build-npm-packages.mjs "${{ needs.version.outputs.version }}" bins npm-dist
+      - name: Publish
+        if: env.NODE_AUTH_TOKEN != ''
+        run: |
+          for pkg in npm-dist/entroclaw-*/; do npm publish --access public "$pkg"; done
+          npm publish --access public npm-dist/entroclaw

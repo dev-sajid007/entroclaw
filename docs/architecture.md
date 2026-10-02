@@ -10,7 +10,14 @@ Coding Agent has two processes that talk over HTTP and Server-Sent Events:
 └───────────────────────────────────────────────────────┘  SSE   └──────────────────────────────────────────────────┘
 ```
 
-The UI only renders state and collects input; the Python runtime owns execution and is the source of truth. Any client that speaks the [API](api.md) can drive it: the headless `coding-agent run` command and the eval runner use the same graph directly.
+The `entroclaw` binary is the entry point (`cli/src/main.ts`):
+- it locates the agent (`entroclaw-agent` installed by uv, or `uv run` in a source checkout)
+- starts it for the chosen directory on a free localhost port with a random bearer token
+- waits for `/health`, runs the TUI, and stops the agent on exit
+
+`auth`, `config`, `doctor` and `upgrade` are handled by the launcher itself (`cli/src/launcher/`). `run` and `serve` are passed to the agent. See [install.md](install.md).
+
+The UI only renders state and collects input; the Python runtime owns execution and is the source of truth. Any client that speaks the [API](api.md) can drive it: the headless `entroclaw-agent run` command and the eval runner use the same graph directly.
 
 ## The graph
 
@@ -94,7 +101,7 @@ Claude models get extra request settings:
 
 ## Persistence
 
-Everything lives in `STATE_DIR` (default `~/.local/state/coding-agent`), never in the workspace:
+Everything lives in `STATE_DIR` (default `~/.local/state/entroclaw`), never in the workspace:
 
 | Path | Contents |
 |---|---|
@@ -102,7 +109,7 @@ Everything lives in `STATE_DIR` (default `~/.local/state/coding-agent`), never i
 | `memory/global.md`, `memory/<hash>.md` | Remembered notes (`services/memory.py`) |
 | `snapshots/<session>/changes.jsonl` | Undo history (`services/history.py`) |
 
-The CLI keeps its prompt history in `~/.local/state/coding-agent/cli-history.json`.
+The CLI keeps its prompt history in `~/.local/state/entroclaw/cli-history.json`.
 
 ## The terminal UI (`cli/`)
 

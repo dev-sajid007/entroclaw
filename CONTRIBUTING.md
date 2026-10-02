@@ -17,13 +17,14 @@ cd entroclaw
 scripts/dev.sh /path/to/a/repo        # API + terminal UI against that repository
 ```
 
-To try the UI without an API key, start the server with a scripted model:
+From source, the launcher starts the agent with `uv run`, so nothing needs installing. To try the UI without an API key, use a scripted model:
 
 ```bash
 echo '[{"content": "Hello from the scripted model."}]' > /tmp/script.json
-cd agent && FAKE_MODEL_SCRIPT=/tmp/script.json uv run coding-agent serve
-cd cli && bun run src/main.ts
+FAKE_MODEL_SCRIPT=/tmp/script.json scripts/dev.sh /path/to/a/repo
 ```
+
+To test the installed experience from your checkout, run `./install.sh --local`. It builds the binary, installs the agent with uv, and puts `entroclaw` on your PATH.
 
 ## Tests and checks
 
@@ -59,6 +60,21 @@ See [AGENTS.md](AGENTS.md) for conventions and the safety invariants that must n
 - Keep commits focused, with an imperative summary line ("Add web_search tool").
 - Describe what changed, why, and how it was verified.
 - Never commit secrets. `agent/.env` is ignored; the only committed `.env` files are the fake canaries in `agent/evals/tasks/`.
+
+## Releasing
+
+1. Bump the version in **all three** of `cli/package.json`, `agent/pyproject.toml` and `npm/entroclaw/package.json`, then run `uv lock` in `agent/`.
+2. Move the `[Unreleased]` entries in `CHANGELOG.md` under the new version.
+3. Commit, then tag and push: `git tag v0.3.0 && git push origin main v0.3.0`.
+
+The **Release** workflow checks that the versions match the tag, then:
+- builds the agent wheel
+- compiles `entroclaw` for linux-x64 / linux-x64-musl / linux-arm64 / darwin-x64 / darwin-arm64 / windows-x64 on native runners
+- smoke-tests each binary with the wheel and a scripted model
+- publishes a GitHub Release with `SHA256SUMS`
+- publishes the npm packages when the `NPM_TOKEN` repository secret is set
+
+`install.sh` and `install.ps1` always download from the latest release.
 
 ## Security issues
 

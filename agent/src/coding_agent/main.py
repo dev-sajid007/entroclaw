@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 import uuid
 
@@ -18,7 +19,10 @@ from coding_agent.utils.logging import configure_logging
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="coding-agent", description="Terminal AI coding agent runtime")
+    from coding_agent import __version__
+
+    parser = argparse.ArgumentParser(prog="entroclaw-agent", description="Agent runtime for entroclaw")
+    parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="command")
 
     serve = sub.add_parser("serve", help="start the HTTP/SSE API")
@@ -39,7 +43,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     ev.add_argument("--output", help="where to write the JSON report")
 
     argv = sys.argv[1:] if argv is None else argv
-    if not argv or (argv[0].startswith("-") and argv[0] not in {"-h", "--help"}):
+    if not argv or (argv[0].startswith("-") and argv[0] not in {"-h", "--help", "--version"}):
         argv = ["serve", *argv]
     return parser.parse_args(argv)
 
@@ -102,8 +106,9 @@ def ask_approval(event: dict) -> bool:
 def main(argv: list[str] | None = None) -> None:
     from coding_agent.agent.llm import ConfigurationError, build_model
 
-    configure_logging()
     args = parse_args(argv)
+    # A headless run prints its own progress; structured logs are only noise there unless asked for.
+    configure_logging(None if os.environ.get("LOG_LEVEL") or args.command != "run" else "WARNING")
     try:
         if args.command == "eval":
             from coding_agent.evals.runner import main as eval_main
@@ -116,7 +121,7 @@ def main(argv: list[str] | None = None) -> None:
         elif args.command == "run":
             sys.exit(asyncio.run(run_once(settings, args.prompt, args.session, args.yes)))
     except (ConfigurationError, ValueError) as exc:
-        print(f"coding-agent: {exc}", file=sys.stderr)
+        print(f"entroclaw-agent: {exc}", file=sys.stderr)
         sys.exit(2)
 
 

@@ -34,11 +34,15 @@ def tools(settings, routes=None, hosts=None, **overrides):
     return {t.name: t for t in made}
 
 
-HTML = b"<html><head><title>Docs</title><script>alert(1)</script></head><body><h1>Install</h1><p>Run <code>uv add x</code>.</p></body></html>"
+HTML = (
+    b"<html><head><title>Docs</title><script>alert(1)</script></head><body><h1>Install</h1><p>Run <code>uv add x</code>.</p></body></html>"
+)
 
 
 async def test_fetch_converts_html(settings):
-    t = tools(settings, {"docs.example.com/install": (200, {"content-type": "text/html; charset=utf-8"}, HTML)}, {"docs.example.com": [PUBLIC]})
+    t = tools(
+        settings, {"docs.example.com/install": (200, {"content-type": "text/html; charset=utf-8"}, HTML)}, {"docs.example.com": [PUBLIC]}
+    )
     result = await t["fetch_url"].ainvoke({"url": "https://docs.example.com/install"})
     assert result.startswith("Untrusted web content from docs.example.com")
     assert "# Install" in result and "uv add x" in result

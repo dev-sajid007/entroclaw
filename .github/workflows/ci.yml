@@ -7,37 +7,73 @@ on:
 
 jobs:
   agent:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: agent
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+      - name: Allow bubblewrap sandboxes (Ubuntu 24.04 restricts unprivileged user namespaces)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y bubblewrap && sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: uv sync --frozen
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
+      - run: uv run ruff check . ../tests
+      - run: uv run ruff format --check . ../tests
       - run: uv run pytest
 
   cli:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: cli
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-      - uses: astral-sh/setup-uv@v6  # the end-to-end test starts the Python agent
-      - run: cd ../agent && uv sync --frozen
+      - uses: astral-sh/setup-uv@v6  # the end-to-end tests start the Python agent
+      - run: uv sync --frozen
+        working-directory: agent
       - run: bun install --frozen-lockfile
       - run: bunx tsc --noEmit
       - run: bun test
+      - run: bun run build
+      - run: ./dist/entroclaw --version
+        shell: bash
+
+  # The real installer, from this checkout, into a clean HOME.
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: astral-sh/setup-uv@v6
+      - name: install.sh --local
+        run: |
+          export HOME="$RUNNER_TEMP/home" SHELL=/bin/bash && mkdir -p "$HOME"
+          sh ./install.sh --local
+          export PATH="$HOME/.entroclaw/bin:$HOME/.local/bin:$PATH"
+          entroclaw --version
+          entroclaw doctor
+          mkdir -p "$RUNNER_TEMP/project" && cd "$RUNNER_TEMP/project"
+          echo '[{"tool_calls":[{"name":"write_file","args":{"path":"hello.txt","content":"hi\n"}}]},{"content":"done"}]' > "$RUNNER_TEMP/script.json"
+          FAKE_MODEL_SCRIPT="$RUNNER_TEMP/script.json" entroclaw run "create hello.txt" --yes
+          test "$(cat hello.txt)" = "hi"
+          sh "$GITHUB_WORKSPACE/install.sh" --uninstall
+          test ! -e "$HOME/.entroclaw/bin/entroclaw"
 
   docker:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t coding-agent ./agent
+      - run: docker build -t entroclaw-agent ./agent
 
   # Real-model benchmark: runs only when an API key secret is configured.
   eval:
@@ -55,7 +91,7 @@ jobs:
       - run: uv sync --frozen
       - name: Run benchmark
         if: env.OPENAI_API_KEY != ''
-        run: uv run coding-agent eval --output evals/reports/ci.json
+        run: uv run entroclaw-agent eval --output evals/reports/ci.json
       - uses: actions/upload-artifact@v4
         if: always() && env.OPENAI_API_KEY != ''
         with:

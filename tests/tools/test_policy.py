@@ -5,7 +5,16 @@ from coding_agent.services.approvals import ApprovalPolicy, Risk, classify_comma
 
 @pytest.mark.parametrize(
     "command",
-    ["ls -la", "pytest -q tests/", "uv run pytest", "git status", "git diff HEAD~1", "cat src/app.py", "find . -name '*.py'", "ruff check ."],
+    [
+        "ls -la",
+        "pytest -q tests/",
+        "uv run pytest",
+        "git status",
+        "git diff HEAD~1",
+        "cat src/app.py",
+        "find . -name '*.py'",
+        "ruff check .",
+    ],
 )
 def test_safe_commands(command, workspace):
     assert classify_command(command, workspace).risk is Risk.SAFE

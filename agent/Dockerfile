@@ -1,6 +1,6 @@
 # Agent API image. Mount the repository to work on at /workspace.
-#   docker build -t coding-agent ./agent
-#   docker run --rm -p 127.0.0.1:8765:8765 -e OPENAI_API_KEY -v "$PWD:/workspace" coding-agent
+#   docker build -t entroclaw-agent ./agent
+#   docker run --rm -p 127.0.0.1:8765:8765 -e OPENAI_API_KEY -v "$PWD:/workspace" entroclaw-agent
 FROM python:3.12-slim AS base
 
 COPY --from=ghcr.io/astral-sh/uv:0.12 /uv /usr/local/bin/uv
@@ -33,5 +33,5 @@ ENV SANDBOX=off \
 VOLUME ["/state"]
 EXPOSE 8765
 HEALTHCHECK --interval=30s --timeout=3s CMD python -c "import urllib.request,os;urllib.request.urlopen(f'http://127.0.0.1:{os.environ[\"PORT\"]}/health')" || exit 1
-ENTRYPOINT ["coding-agent"]
+ENTRYPOINT ["entroclaw-agent"]
 CMD ["serve"]

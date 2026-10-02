@@ -49,7 +49,12 @@ async def test_undo_restores_last_turn(make_client, workspace_dir):
     turns = [
         {"tool_calls": [call("edit_file", path="hello.py", old_string="hello", new_string="bye")]},
         {"content": "turn 1 done"},
-        {"tool_calls": [call("write_file", path="new.py", content="x\n"), call("edit_file", path="hello.py", old_string="bye", new_string="ciao")]},
+        {
+            "tool_calls": [
+                call("write_file", path="new.py", content="x\n"),
+                call("edit_file", path="hello.py", old_string="bye", new_string="ciao"),
+            ]
+        },
         {"content": "turn 2 done"},
     ]
     client = await make_client(turns=turns)

@@ -8,7 +8,7 @@ Endpoints that run the agent return a **`text/event-stream`**: one JSON event pe
 
 | Method & path | Body | Returns |
 |---|---|---|
-| `GET /health` | — | `{status, workspace, model, models, providers, require_approval, sandbox, tools, mcp_errors}` |
+| `GET /health` | — | `{status, version, shell, workspace, model, models, providers, require_approval, sandbox, tools, mcp_errors}` |
 | `GET /models` | — | `{default, models, providers}` |
 | `POST /sessions` | — | `{session_id}` |
 | `GET /sessions?limit=20` | — | `{sessions: [{session_id, title, created_at, updated_at}]}` for this workspace, newest first |

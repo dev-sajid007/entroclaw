@@ -1,7 +1,7 @@
 [project]
-name = "coding-agent"
-version = "0.1.0"
-description = "Python + LangGraph runtime for the coding agent"
+name = "entroclaw-agent"
+version = "0.2.0"
+description = "Agent runtime for entroclaw, a terminal AI coding assistant (LangGraph + HTTP/SSE API)"
 readme = "README.md"
 authors = [
     { name = "dev-sajid007", email = "dev.sajid007@gmail.com" }
@@ -23,7 +23,11 @@ dependencies = [
 ]
 
 [project.scripts]
+entroclaw-agent = "coding_agent.main:main"
 coding-agent = "coding_agent.main:main"
+
+[tool.uv.build-backend]
+module-name = "coding_agent"
 
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13.0"]

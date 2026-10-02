@@ -16,6 +16,7 @@ import html2text
 import httpx
 from langchain_core.tools import BaseTool, tool
 
+from coding_agent import __version__
 from coding_agent.config.settings import Settings
 from coding_agent.tools.filesystem import ToolError
 from coding_agent.utils.security import truncate
@@ -24,7 +25,7 @@ FETCH_TIMEOUT = 20.0
 MAX_DOWNLOAD_BYTES = 2_000_000
 MAX_REDIRECTS = 5
 TEXT_TYPES = ("text/", "application/json", "application/xml", "application/xhtml+xml", "application/javascript")
-USER_AGENT = "coding-agent/0.1 (+https://github.com/dev-sajid007/entroclaw)"
+USER_AGENT = f"entroclaw/{__version__} (+https://github.com/dev-sajid007/entroclaw)"
 
 Resolver = Callable[[str], Awaitable[list[str]]]
 

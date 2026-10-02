@@ -24,7 +24,16 @@ async def test_successful_task_is_scored(settings):
     [task] = load_tasks(DEFAULT_TASKS_DIR, ["001-add-missing-function"])
     model = scripted(
         {"tool_calls": [call("read_file", path="mathutils.py")]},
-        {"tool_calls": [call("edit_file", path="mathutils.py", old_string="def subtract", new_string="def multiply(a, b):\n    return a * b\n\n\ndef subtract")]},
+        {
+            "tool_calls": [
+                call(
+                    "edit_file",
+                    path="mathutils.py",
+                    old_string="def subtract",
+                    new_string="def multiply(a, b):\n    return a * b\n\n\ndef subtract",
+                )
+            ]
+        },
         {"tool_calls": [call("run_command", command="python -m pytest -q")]},
         {"content": "Added multiply; tests pass."},
     )

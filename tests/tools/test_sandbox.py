@@ -1,16 +1,15 @@
 """Bubblewrap sandbox for run_command. Skipped where bwrap isn't installed (e.g. inside the Docker image)."""
 
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from coding_agent.services.sandbox import SandboxError, sandbox_argv, sandbox_status
+from coding_agent.services.sandbox import SandboxError, bwrap_usable, sandbox_argv, sandbox_status
 from coding_agent.tools.shell import make_shell_tools
 
-needs_bwrap = pytest.mark.skipif(shutil.which("bwrap") is None, reason="bubblewrap not installed")
+needs_bwrap = pytest.mark.skipif(not bwrap_usable()[0], reason=bwrap_usable()[1] or "bubblewrap unusable")
 
 
 @pytest.fixture
@@ -43,11 +42,21 @@ def run(settings, workspace, fake_home, monkeypatch):
 
 
 def test_status(settings, monkeypatch):
+    import coding_agent.services.sandbox as sandbox
+
     assert sandbox_status(settings.with_overrides(sandbox="off")).enabled is False
-    monkeypatch.setattr(shutil, "which", lambda _name: None)
-    assert sandbox_status(settings).enabled is False  # auto without bwrap
-    with pytest.raises(SandboxError):
+    monkeypatch.setattr(sandbox, "bwrap_usable", lambda: (False, "bubblewrap not installed"))
+    monkeypatch.setattr(sandbox.sys, "platform", "linux")
+    status = sandbox_status(settings)  # auto falls back with the reason
+    assert status.enabled is False and "not installed" in status.describe()
+    with pytest.raises(SandboxError, match="not installed"):
         sandbox_status(settings.with_overrides(sandbox="bwrap"))
+    monkeypatch.setattr(
+        sandbox, "bwrap_usable", lambda: (False, "bubblewrap cannot create a sandbox here (setting up uid map: Permission denied)")
+    )
+    assert "cannot create a sandbox" in sandbox_status(settings).describe()
+    monkeypatch.setattr(sandbox.sys, "platform", "darwin")
+    assert sandbox_status(settings).describe() == "off (not available on this platform)"
 
 
 @needs_bwrap

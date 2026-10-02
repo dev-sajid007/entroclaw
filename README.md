@@ -1,48 +1,56 @@
-# Coding Agent
+# entroclaw
 
-A terminal AI coding assistant with two deliberately separate parts:
+An AI coding agent for your terminal. It reads, edits and tests code in your project, asks before it changes anything, and runs commands in a sandbox.
 
-- **`agent/`**: Python 3.12, LangGraph runtime, tools, policy/approval layer, HTTP + SSE API
-- **`cli/`**: TypeScript, Bun and OpenTUI terminal UI
+```bash
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/dev-sajid007/entroclaw/main/install.sh | sh
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/dev-sajid007/entroclaw/main/install.ps1 | iex
+
+# or with npm (any OS)
+npm install -g entroclaw
+```
+
+Then:
+
+```bash
+entroclaw auth                 # add an API key (Anthropic, OpenAI, …)
+cd your-project && entroclaw   # start working
+```
+
+Other commands:
+
+| Command | What it does |
+|---|---|
+| `entroclaw -c` | Continue the last session in this directory |
+| `entroclaw run "fix the failing test" --yes` | Run one task headlessly |
+| `entroclaw config` | Show and change settings |
+| `entroclaw doctor` | Check the installation |
+| `entroclaw upgrade` | Update to the latest release |
+
+See [docs/install.md](docs/install.md) for details, uninstalling and troubleshooting.
+
+Under the hood there are two parts:
+- **`agent/`** (`entroclaw-agent`): Python 3.12 and LangGraph, with the tools, the approval policy and an HTTP + SSE API. Installed with uv.
+- **`cli/`** (`entroclaw`): a TypeScript + OpenTUI terminal UI, compiled with Bun into a single binary that starts the agent for the current directory.
 
 ## Documentation
 
 | | |
 |---|---|
+| [docs/install.md](docs/install.md) | Install methods, file locations, upgrade, uninstall, troubleshooting |
 | [docs/architecture.md](docs/architecture.md) | How the graph, policy, state, persistence and UI fit together |
 | [docs/api.md](docs/api.md) | HTTP endpoints and the SSE event protocol |
 | [docs/evaluation.md](docs/evaluation.md) | Running and extending the benchmark |
 | [SECURITY.md](SECURITY.md) | Threat model, defences, known limitations, reporting |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Setup, tests and how to change things |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Running from source, tests, releasing |
 | [AGENTS.md](AGENTS.md) | Repository guide for AI coding agents (also loaded by this agent) |
 | [CHANGELOG.md](CHANGELOG.md) | What changed |
-| [coding-agent-documentation.md](coding-agent-documentation.md) | The original design spec and milestones |
+| [documentation.md](documentation.md) | The original design spec and milestones |
 
-## Quick start
-
-```bash
-# 1. configure
-cp agent/.env.example agent/.env      # then set OPENAI_API_KEY (and MODEL)
-(cd agent && uv sync) && (cd cli && bun install)
-
-# 2. run against a repository (starts the API, then opens the UI)
-scripts/dev.sh /path/to/your/repo
-```
-
-Or run the two processes yourself:
-
-```bash
-cd agent && WORKSPACE=/path/to/repo uv run coding-agent serve
-cd cli && bun run src/main.ts                  # -c resumes the latest session, --session <id> a specific one
-```
-
-Headless, without the UI:
-
-```bash
-cd agent && WORKSPACE=/path/to/repo uv run coding-agent run "Fix the failing test"   # --yes auto-approves
-```
-
-### In the UI
+## In the UI
 
 | Input | Effect |
 |---|---|
@@ -97,7 +105,7 @@ Claude models (e.g. `anthropic:claude-opus-5-5`) are configured for agentic codi
 ### Context, instructions and memory
 
 - **Context management.** When the conversation exceeds `CONTEXT_TOKEN_LIMIT`, older turns are summarized by the model and removed; roughly `CONTEXT_KEEP_TOKENS` of recent history stays verbatim. Cuts never separate a tool call from its result. If summarization fails, older turns are dropped and the user's requests are kept.
-- **Project instructions.** The first of `AGENTS.md`, `CLAUDE.md` or `.coding-agent/instructions.md` at the workspace root is added to the system prompt on every call. These files can't override the safety rules.
+- **Project instructions.** The first of `AGENTS.md`, `CLAUDE.md` or `.entroclaw/instructions.md` at the workspace root is added to the system prompt on every call. These files can't override the safety rules.
 - **Memory.** The agent's `remember` tool saves short, durable notes (preferences, conventions, decisions) to the state directory, never to the repository. Notes are per project or global and are included in later sessions. Secret-looking notes are refused.
 - **Undo.** Before each `write_file` / `edit_file`, the previous content is snapshotted in the state directory. `/undo` restores the last turn's files and deletes files the agent created. A file changed by someone else since is skipped and reported. Changes made through `run_command` are not tracked.
 
@@ -136,7 +144,7 @@ The sandbox contains approved commands; approval rules still decide what runs. G
 
 ## Configuration
 
-All settings are environment variables. See [agent/.env.example](agent/.env.example).
+Settings live in your config file (`entroclaw config path`: `~/.config/entroclaw/config.env`, or `%APPDATA%\entroclaw\config.env` on Windows). Change them with `entroclaw config set KEY VALUE`; environment variables override the file. Running from source uses `agent/.env` instead (see [agent/.env.example](agent/.env.example)).
 
 | Variable | Default | |
 |---|---|---|
@@ -146,7 +154,7 @@ All settings are environment variables. See [agent/.env.example](agent/.env.exam
 | `MAX_TOOL_OUTPUT`, `COMMAND_TIMEOUT`, `MAX_ITERATIONS` | 20000, 30, 25 | |
 | `REQUIRE_APPROVAL` | `true` | |
 | `CONTEXT_TOKEN_LIMIT`, `CONTEXT_KEEP_TOKENS` | 100000, 30000 | when to summarize, and how much recent history to keep |
-| `STATE_DIR` | `~/.local/state/coding-agent` | checkpoints, sessions, memory and undo snapshots |
+| `STATE_DIR` | `~/.local/state/entroclaw` (`%LOCALAPPDATA%\entroclaw` on Windows) | checkpoints, sessions, memory, undo snapshots, server log |
 | `MODELS`, `MODEL_EFFORT`, `ANTHROPIC_FALLBACKS` | —, `high`, `default` | extra models for `/model`; Claude effort; Claude refusal fallback |
 | `SANDBOX`, `SANDBOX_NETWORK` | `auto`, `false` | bubblewrap sandbox for shell commands |
 | `TAVILY_API_KEY` / `BRAVE_SEARCH_API_KEY`, `WEB_ALLOW_PRIVATE` | —, `false` | web search provider; allow private-network fetches |
@@ -160,7 +168,7 @@ All settings are environment variables. See [agent/.env.example](agent/.env.exam
 ```bash
 cd agent && uv run pytest          # tools, policy, security, graph, context, memory, undo, API, MCP, evals, headless e2e
 cd cli && bun test                 # reducer, SSE parser, history, rendered UI frames, full-stack e2e (starts the Python agent)
-cd agent && uv run coding-agent eval [--only 001-add-missing-function] [--baseline old-report.json]
+cd agent && uv run entroclaw-agent eval [--only 001-add-missing-function] [--baseline old-report.json]
 ```
 
 Tests use a scripted model (`agent/fake.py`), so they need no API key. The benchmark (`agent/evals/tasks/`) runs the real model on fixture repositories:
@@ -178,8 +186,8 @@ Each report records success, tool selection, tool errors and recovery, iteration
 ## Docker
 
 ```bash
-docker build -t coding-agent ./agent
-docker run --rm -p 127.0.0.1:8765:8765 -e OPENAI_API_KEY -v "$PWD:/workspace" -v coding-agent-state:/state coding-agent
+docker build -t entroclaw-agent ./agent
+docker run --rm -p 127.0.0.1:8765:8765 -e OPENAI_API_KEY -v "$PWD:/workspace" -v entroclaw-state:/state entroclaw-agent
 ```
 
 The container runs as an unprivileged user and keeps its checkpoints in the `/state` volume. CI (`.github/workflows/ci.yml`) runs lint, both test suites and the Docker build. When an `OPENAI_API_KEY` secret is configured, it also runs the benchmark.

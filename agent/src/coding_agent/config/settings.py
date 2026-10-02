@@ -9,12 +9,32 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
-AGENT_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
+APP_NAME = "entroclaw"
+IS_WINDOWS = os.name == "nt"
+
+
+def config_dir() -> Path:
+    """Where the user's config (API keys, model) lives: never inside a project."""
+    if IS_WINDOWS:
+        return Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / APP_NAME
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / APP_NAME
 
 
 def _state_dir() -> Path:
-    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    return Path(base) / "coding-agent"
+    if IS_WINDOWS:
+        return Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / APP_NAME
+    return Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state") / APP_NAME
+
+
+def _default_env_file() -> Path:
+    # A source checkout uses agent/.env; an installed package uses the user's config file.
+    checkout = Path(__file__).resolve().parents[3]
+    if (checkout / "pyproject.toml").is_file():
+        return checkout / ".env"
+    return config_dir() / "config.env"
+
+
+AGENT_ENV_FILE = _default_env_file()
 
 
 def _env_int(name: str, default: int) -> int:

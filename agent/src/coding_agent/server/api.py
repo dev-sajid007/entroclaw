@@ -19,6 +19,7 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
+from coding_agent import __version__
 from coding_agent.agent.graph import Runtime, open_runtime
 from coding_agent.agent.llm import ConfigurationError, configured_providers, parse_spec
 from coding_agent.agent.nodes import ModelFactory
@@ -27,6 +28,7 @@ from coding_agent.server.events import message_text, stream_events
 from coding_agent.services.history import FileHistory
 from coding_agent.services.memory import SCOPES, MemoryStore, load_instructions
 from coding_agent.services.sandbox import sandbox_status
+from coding_agent.services.shell_env import resolve_shell
 from coding_agent.services.workspace import Workspace
 from coding_agent.utils.logging import get_logger
 
@@ -135,6 +137,8 @@ def create_app(settings: Settings, model: BaseChatModel | None = None, model_fac
         runtime = runtime_of(request)
         return {
             "status": "ok",
+            "version": __version__,
+            "shell": resolve_shell().name,
             "workspace": str(settings.workspace),
             "model": settings.default_model_spec if not settings.fake_model_script else "scripted",
             "models": settings.available_models,

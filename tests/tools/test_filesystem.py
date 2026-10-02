@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from coding_agent.tools.filesystem import ToolError, make_filesystem_tools, preview_file_change
@@ -29,6 +31,7 @@ def test_read_file_outside_workspace_is_blocked(fs):
         fs["read_file"].invoke({"path": "../../../etc/passwd"})
 
 
+@pytest.mark.skipif(os.name == "nt", reason="creating symlinks needs extra privileges on Windows")
 def test_read_file_symlink_escape_is_blocked(fs, workspace_dir, tmp_path):
     outside = tmp_path / "outside.txt"
     outside.write_text("secret")

@@ -8,7 +8,7 @@ from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
 
 from coding_agent.agent.fake import ScriptedChatModel
-from coding_agent.config.settings import Settings
+from coding_agent.config.settings import AGENT_ENV_FILE, Settings
 
 # Providers recognised as a "provider:" prefix. Anything else is a model name for the default provider
 # (model names may themselves contain ":", e.g. Ollama tags).
@@ -80,7 +80,8 @@ def build_model(settings: Settings, spec: str | None = None) -> BaseChatModel:
     provider, model = parse_spec(spec or settings.default_model_spec, settings.model_provider)
     key = PROVIDER_KEYS.get(provider)
     if key and not os.environ.get(key):
-        raise ConfigurationError(f"{key} is not set. Add it to agent/.env or the environment to use {provider}:{model}.")
+        env_file = os.environ.get("AGENT_ENV_FILE") or AGENT_ENV_FILE
+        raise ConfigurationError(f"{key} is not set (needed for {provider}:{model}). Run `entroclaw auth`, or add it to {env_file}.")
     kwargs: dict = {}
     if provider == "openai":
         kwargs["stream_usage"] = True

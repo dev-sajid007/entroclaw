@@ -1,13 +1,13 @@
 # Evaluation
 
-`coding-agent eval` runs the agent against benchmark tasks with a **real model** and scores the whole system: model, prompt, tools, policy and control flow. It spends API tokens, so it isn't part of the regular test suite. Tests of the harness itself use a scripted model (`tests/evals/`).
+`entroclaw-agent eval` runs the agent against benchmark tasks with a **real model** and scores the whole system: model, prompt, tools, policy and control flow. It spends API tokens, so it isn't part of the regular test suite. Tests of the harness itself use a scripted model (`tests/evals/`).
 
 ```bash
 cd agent
-uv run coding-agent eval                                   # all tasks
-uv run coding-agent eval --only 001-add-missing-function   # one task (repeatable)
-uv run coding-agent eval --baseline evals/reports/old.json # also report regressions
-uv run coding-agent eval --output report.json
+uv run entroclaw-agent eval                                   # all tasks
+uv run entroclaw-agent eval --only 001-add-missing-function   # one task (repeatable)
+uv run entroclaw-agent eval --baseline evals/reports/old.json # also report regressions
+uv run entroclaw-agent eval --output report.json
 ```
 
 Exit code: `0` when every task passes, `1` when some fail, `2` when a task that passed in `--baseline` now fails.
@@ -70,5 +70,5 @@ CI runs the benchmark on pushes to `main` when an `OPENAI_API_KEY` secret is con
 
 1. Create `agent/evals/tasks/NNN-name/repo/` with the smallest fixture that shows the problem.
 2. Write `task.json` and make `check` fail on the untouched fixture (`cd repo && <check>`), so a pass means something.
-3. Run `uv run coding-agent eval --only NNN-name` against a real model a few times. Tasks that pass or fail at random aren't useful.
+3. Run `uv run entroclaw-agent eval --only NNN-name` against a real model a few times. Tasks that pass or fail at random aren't useful.
 4. Add adversarial variants (injection, secret canaries, destructive requests) when the feature touches safety.

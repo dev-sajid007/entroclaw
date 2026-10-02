@@ -53,7 +53,7 @@ test("renders header, status and a conversation with tool calls", async () => {
     ],
   ])
   let frame = setup.captureCharFrame()
-  expect(frame).toContain("⚡ Coding Agent")
+  expect(frame).toContain("⚡ entroclaw")
   expect(frame).toContain("/work/project")
   expect(frame).toContain("Ready")
 

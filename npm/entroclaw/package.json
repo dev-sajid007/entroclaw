@@ -1,0 +1,21 @@
+{
+  "name": "entroclaw",
+  "version": "0.2.0",
+  "description": "AI coding agent for your terminal",
+  "homepage": "https://github.com/dev-sajid007/entroclaw",
+  "repository": { "type": "git", "url": "git+https://github.com/dev-sajid007/entroclaw.git" },
+  "bugs": "https://github.com/dev-sajid007/entroclaw/issues",
+  "license": "MIT",
+  "keywords": ["ai", "coding-agent", "cli", "tui", "langgraph", "llm"],
+  "bin": { "entroclaw": "bin/entroclaw.js" },
+  "files": ["bin/entroclaw.js", "README.md"],
+  "engines": { "node": ">=18" },
+  "optionalDependencies": {
+    "entroclaw-linux-x64": "0.2.0",
+    "entroclaw-linux-x64-musl": "0.2.0",
+    "entroclaw-linux-arm64": "0.2.0",
+    "entroclaw-darwin-x64": "0.2.0",
+    "entroclaw-darwin-arm64": "0.2.0",
+    "entroclaw-windows-x64": "0.2.0"
+  }
+}

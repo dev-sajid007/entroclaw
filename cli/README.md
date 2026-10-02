@@ -1,4 +1,4 @@
-# coding-agent CLI (OpenTUI)
+# entroclaw CLI (launcher + OpenTUI)
 
 Terminal UI for the agent. See the [project README](../README.md).
 
