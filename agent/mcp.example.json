@@ -1,0 +1,15 @@
+{
+  "servers": {
+    "github": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}" },
+      "trusted_tools": ["search_repositories", "get_issue", "list_issues"]
+    },
+    "docs": {
+      "transport": "streamable_http",
+      "url": "http://localhost:8000/mcp"
+    }
+  }
+}

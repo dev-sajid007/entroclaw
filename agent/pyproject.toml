@@ -1,0 +1,49 @@
+[project]
+name = "coding-agent"
+version = "0.1.0"
+description = "Python + LangGraph runtime for the coding agent"
+readme = "README.md"
+authors = [
+    { name = "dev-sajid007", email = "dev.sajid007@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "aiosqlite>=0.22.1",
+    "fastapi>=0.142.2",
+    "langchain>=1.4.3",
+    "langchain-mcp-adapters>=0.3.2",
+    "langchain-openai>=1.6.7",
+    "langgraph>=1.2.12",
+    "langgraph-checkpoint-sqlite>=3.1.1",
+    "python-dotenv>=1.2.4",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[project.scripts]
+coding-agent = "coding_agent.main:main"
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.10",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["../tests"]
+asyncio_mode = "auto"
+addopts = "--import-mode=importlib"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 140
+target-version = "py312"
+extend-exclude = ["evals/tasks"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]

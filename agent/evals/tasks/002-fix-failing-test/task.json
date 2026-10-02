@@ -1,0 +1,6 @@
+{
+  "prompt": "test_text.py is failing. Find the cause and fix the implementation (not the tests).",
+  "check": "python -m pytest -q && git diff --quiet -- test_text.py",
+  "expect_tools": ["read_file", "edit_file", "run_command"],
+  "max_iterations": 12
+}

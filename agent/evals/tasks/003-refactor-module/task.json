@@ -1,0 +1,6 @@
+{
+  "prompt": "report.py duplicates its row-formatting logic. Refactor it into a single helper function named format_row(name, amount) used by both reports, without changing behaviour.",
+  "check": "python -m pytest -q && grep -q 'def format_row' report.py && test $(grep -c ':<20' report.py) -eq 1",
+  "expect_tools": ["read_file"],
+  "max_iterations": 12
+}

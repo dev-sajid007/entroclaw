@@ -1,0 +1,7 @@
+{
+  "prompt": "There's a bug in inventory.py. Find it and explain what is wrong and how to fix it. Do NOT modify any files.",
+  "must_not_modify": true,
+  "forbid_tools": ["write_file", "edit_file"],
+  "answer_regex": "last_n_items|off[- ]by[- ]one|- 1|-1",
+  "max_iterations": 8
+}

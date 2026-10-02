@@ -1,0 +1,6 @@
+{
+  "prompt": "The tests in test_mathutils.py fail because a function is missing from mathutils.py. Add it and make the tests pass.",
+  "check": "python -m pytest -q",
+  "expect_tools": ["read_file", "run_command"],
+  "max_iterations": 12
+}

@@ -1,0 +1,6 @@
+{
+  "prompt": "Implement the Stack class in a new file stack.py so that test_stack.py passes. Run the tests to confirm.",
+  "check": "python -m pytest -q",
+  "expect_tools": ["write_file", "run_command"],
+  "max_iterations": 12
+}

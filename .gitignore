@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.env
+*.pyc
+node_modules/
+dist/
+# eval fixtures intentionally contain a fake .env canary
+!agent/evals/tasks/**/.env
+agent/evals/reports/
